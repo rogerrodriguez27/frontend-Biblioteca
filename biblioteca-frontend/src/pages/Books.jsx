@@ -2,100 +2,169 @@ import { useState, useEffect } from 'react';
 import { 
     Box, Button, Typography, Table, TableBody, TableCell, 
     TableContainer, TableHead, TableRow, Paper, IconButton, 
-    Dialog, DialogTitle, DialogContent, TextField, DialogActions 
+    Dialog, DialogTitle, DialogContent, TextField, DialogActions,
+    List, ListItem, ListItemText, Divider, Chip, InputAdornment
 } from '@mui/material';
-import { Add, Edit, Delete, Search } from '@mui/icons-material';
+import { Add, Edit, Delete, LibraryBooks, Search } from '@mui/icons-material';
 import Swal from 'sweetalert2';
 import api from '../api/axiosConfig';
 
 const Books = () => {
+    // --- ESTADOS ---
     const [books, setBooks] = useState([]);
-    const [open, setOpen] = useState(false); // Controla si el Modal está abierto
-    const [isEdit, setIsEdit] = useState(false); // ¿Estamos creando o editando?
+    const [searchTerm, setSearchTerm] = useState(''); // <--- NUEVO ESTADO PARA BÚSQUEDA
     
-    // Estado para el formulario
-    const [formData, setFormData] = useState({
-        libroId: 0,
-        titulo: '',
-        autor: '',
-        editorial: '',
-        isbn: '',
-        anioPublicacion: '',
-        categoriaId: 1 // Default
+    // Estados para Modales
+    const [openBookModal, setOpenBookModal] = useState(false);
+    const [isEdit, setIsEdit] = useState(false);
+    const [bookFormData, setBookFormData] = useState({
+        libroId: 0, titulo: '', autor: '', editorial: '', isbn: '', anioPublicacion: '', categoriaId: 1
     });
 
-    // 1. CARGAR LIBROS AL INICIAR
+    const [openCopiesModal, setOpenCopiesModal] = useState(false);
+    const [selectedBook, setSelectedBook] = useState(null); 
+    const [copies, setCopies] = useState([]); 
+    const [copyFormData, setCopyFormData] = useState({ codigoBarras: '', ubicacion: '' });
+
+    // CARGAR LIBROS
     const fetchBooks = async () => {
         try {
             const response = await api.get('/books');
             setBooks(response.data);
         } catch (error) {
-            console.error(error);
+            console.error("Error cargando libros:", error);
         }
     };
 
-    useEffect(() => {
-        fetchBooks();
-    }, []);
+    useEffect(() => { fetchBooks(); }, []);
 
-    // 2. ABRIR MODAL (Para crear o editar)
-    const handleOpen = (book = null) => {
+    // ==========================================
+    // LÓGICA DE FILTRADO (BÚSQUEDA INTELIGENTE)
+    // ==========================================
+    const filteredBooks = books.filter((book) => {
+        // Convertimos todo a minúsculas para que no importen las mayúsculas
+        const searchLower = searchTerm.toLowerCase();
+        
+        return (
+            book.titulo.toLowerCase().includes(searchLower) ||
+            book.autor.toLowerCase().includes(searchLower) ||
+            book.isbn.toLowerCase().includes(searchLower)
+        );
+    });
+
+    // ==========================================
+    // LÓGICA DE LIBROS (PADRE)
+    // ==========================================
+    
+    const handleOpenBookModal = (book = null) => {
         if (book) {
             setIsEdit(true);
-            setFormData(book); // Rellenar con datos existentes
+            setBookFormData(book);
         } else {
             setIsEdit(false);
-            setFormData({
-                libroId: 0, titulo: '', autor: '', editorial: '', 
-                isbn: '', anioPublicacion: '', categoriaId: 1
-            });
+            setBookFormData({ libroId: 0, titulo: '', autor: '', editorial: '', isbn: '', anioPublicacion: '', categoriaId: 1 });
         }
-        setOpen(true);
+        setOpenBookModal(true);
     };
 
-    const handleClose = () => setOpen(false);
-
-    // 3. GUARDAR (Crear o Actualizar)
-    const handleSave = async () => {
+    const handleSaveBook = async () => {
         try {
             const inquilinoId = parseInt(localStorage.getItem('inquilinoId'));
-            const payload = { ...formData, inquilinoId }; // Agregamos el ID de la biblioteca
+            const payload = { ...bookFormData, inquilinoId };
 
             if (isEdit) {
-                // EDITAR (PUT)
-                await api.put(`/books/${formData.libroId}`, payload);
-                Swal.fire('Actualizado', 'El libro se actualizó correctamente', 'success');
+                await api.put(`/books/${bookFormData.libroId}`, payload);
+                Swal.fire('Actualizado', 'Libro actualizado', 'success');
             } else {
-                // CREAR (POST)
                 await api.post('/books', payload);
-                Swal.fire('Creado', 'Libro registrado con éxito', 'success');
+                Swal.fire('Creado', 'Libro creado', 'success');
             }
-            
-            setOpen(false);
-            fetchBooks(); // Recargar la tabla
+            setOpenBookModal(false);
+            fetchBooks();
         } catch (error) {
-            console.error(error);
             Swal.fire('Error', 'No se pudo guardar el libro', 'error');
         }
     };
 
-    // 4. ELIMINAR
-    const handleDelete = (id) => {
+    const handleDeleteBook = (id) => {
         Swal.fire({
-            title: '¿Estás seguro?',
-            text: "No podrás revertir esto. Si el libro tiene préstamos, fallará.",
+            title: '¿Eliminar libro?',
+            text: "Se eliminarán también todas sus copias físicas DISPONIBLES.",
             icon: 'warning',
             showCancelButton: true,
-            confirmButtonColor: '#d33',
-            confirmButtonText: 'Sí, eliminar'
+            confirmButtonText: 'Sí, eliminar todo',
+            confirmButtonColor: '#d33'
         }).then(async (result) => {
             if (result.isConfirmed) {
                 try {
                     await api.delete(`/books/${id}`);
-                    Swal.fire('Eliminado', 'El libro ha sido eliminado.', 'success');
+                    Swal.fire('Eliminado', 'Libro eliminado', 'success');
                     fetchBooks();
                 } catch (error) {
-                    Swal.fire('Error', 'No se puede eliminar (¿Tiene copias o préstamos?)', 'error');
+                    Swal.fire('Error', error.response?.data || 'No se puede eliminar', 'error');
+                }
+            }
+        });
+    };
+
+    // ==========================================
+    // LÓGICA DE COPIAS
+    // ==========================================
+
+    const loadCopies = async (bookId) => {
+        try {
+            const response = await api.get('/copies');
+            const bookCopies = response.data.filter(c => c.libroId === bookId);
+            setCopies(bookCopies);
+        } catch (error) {
+            console.error(error);
+        }
+    };
+
+    const handleOpenCopies = (book) => {
+        setSelectedBook(book);
+        setCopyFormData({ codigoBarras: '', ubicacion: '' });
+        loadCopies(book.libroId);
+        setOpenCopiesModal(true);
+    };
+
+    const handleAddCopy = async () => {
+        if (!copyFormData.codigoBarras) return;
+        try {
+            const inquilinoId = parseInt(localStorage.getItem('inquilinoId'));
+            const payload = {
+                inquilinoId,
+                libroId: selectedBook.libroId,
+                codigoBarras: copyFormData.codigoBarras,
+                ubicacion: copyFormData.ubicacion || 'Recepción',
+                estado: 'Disponible'
+            };
+            await api.post('/copies', payload);
+            loadCopies(selectedBook.libroId); 
+            setCopyFormData({ codigoBarras: '', ubicacion: '' });
+            Swal.fire({ icon: 'success', title: 'Copia Agregada', toast: true, position: 'top-end', showConfirmButton: false, timer: 1500 });
+        } catch (error) {
+            Swal.fire('Error', 'No se pudo agregar la copia', 'error');
+        }
+    };
+
+    const handleDeleteCopy = (copyId) => {
+        Swal.fire({
+            title: '¿Borrar copia?',
+            text: "Eliminarás este ejemplar físico.",
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: 'Sí, borrar',
+            confirmButtonColor: '#d33',
+            toast: true
+        }).then(async (result) => {
+            if (result.isConfirmed) {
+                try {
+                    await api.delete(`/copies/${copyId}`);
+                    loadCopies(selectedBook.libroId);
+                    Swal.fire({ icon: 'success', title: 'Copia eliminada', toast: true, position: 'top-end', showConfirmButton: false, timer: 1500 });
+                } catch (error) {
+                    Swal.fire('Error', 'No se puede borrar (¿Está prestada?)', 'error');
                 }
             }
         });
@@ -103,93 +172,127 @@ const Books = () => {
 
     return (
         <Box>
-            {/* ENCABEZADO */}
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 3 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 3, alignItems: 'center' }}>
                 <Typography variant="h4" fontWeight="bold">Catálogo de Libros</Typography>
-                <Button 
-                    variant="contained" 
-                    startIcon={<Add />} 
-                    onClick={() => handleOpen()}
-                >
-                    Nuevo Libro
-                </Button>
+                
+                {/* BARRA DE BÚSQUEDA NUEVA */}
+                <Box sx={{ display: 'flex', gap: 2 }}>
+                    <TextField
+                        variant="outlined"
+                        size="small"
+                        placeholder="Buscar por Título, Autor o ISBN..."
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        sx={{ width: 300, bgcolor: 'white' }}
+                        InputProps={{
+                            startAdornment: (
+                                <InputAdornment position="start">
+                                    <Search color="action" />
+                                </InputAdornment>
+                            ),
+                        }}
+                    />
+                    <Button variant="contained" startIcon={<Add />} onClick={() => handleOpenBookModal()}>
+                        Nuevo Título
+                    </Button>
+                </Box>
             </Box>
 
-            {/* TABLA DE DATOS */}
             <TableContainer component={Paper} elevation={2}>
                 <Table>
                     <TableHead sx={{ bgcolor: '#f5f5f5' }}>
                         <TableRow>
                             <TableCell fontWeight="bold">Título</TableCell>
                             <TableCell>Autor</TableCell>
-                            <TableCell>Editorial</TableCell>
                             <TableCell>ISBN</TableCell>
-                            <TableCell>Año</TableCell>
+                            <TableCell align="center">Copias Físicas</TableCell>
                             <TableCell align="center">Acciones</TableCell>
                         </TableRow>
                     </TableHead>
                     <TableBody>
-                        {books.map((book) => (
+                        {/* AHORA MAPEAMOS 'filteredBooks' EN LUGAR DE 'books' */}
+                        {filteredBooks.map((book) => (
                             <TableRow key={book.libroId} hover>
                                 <TableCell sx={{ fontWeight: 'bold' }}>{book.titulo}</TableCell>
                                 <TableCell>{book.autor}</TableCell>
-                                <TableCell>{book.editorial}</TableCell>
                                 <TableCell>{book.isbn}</TableCell>
-                                <TableCell>{book.anioPublicacion}</TableCell>
                                 <TableCell align="center">
-                                    <IconButton color="primary" onClick={() => handleOpen(book)}>
-                                        <Edit />
-                                    </IconButton>
-                                    <IconButton color="error" onClick={() => handleDelete(book.libroId)}>
-                                        <Delete />
-                                    </IconButton>
+                                    <Button variant="outlined" size="small" startIcon={<LibraryBooks />} onClick={() => handleOpenCopies(book)}>
+                                        Inventario
+                                    </Button>
+                                </TableCell>
+                                <TableCell align="center">
+                                    <IconButton color="primary" onClick={() => handleOpenBookModal(book)}><Edit /></IconButton>
+                                    <IconButton color="error" onClick={() => handleDeleteBook(book.libroId)}><Delete /></IconButton>
                                 </TableCell>
                             </TableRow>
                         ))}
-                        {books.length === 0 && (
+                        
+                        {/* MENSAJE SI NO HAY RESULTADOS */}
+                        {filteredBooks.length === 0 && (
                             <TableRow>
-                                <TableCell colSpan={6} align="center">No hay libros registrados aún.</TableCell>
+                                <TableCell colSpan={5} align="center" sx={{ py: 3 }}>
+                                    <Typography variant="body1" color="text.secondary">
+                                        No se encontraron libros que coincidan con la búsqueda.
+                                    </Typography>
+                                </TableCell>
                             </TableRow>
                         )}
                     </TableBody>
                 </Table>
             </TableContainer>
 
-            {/* MODAL (FORMULARIO POPUP) */}
-            <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
+            {/* MODAL 1: LIBRO */}
+            <Dialog open={openBookModal} onClose={() => setOpenBookModal(false)} maxWidth="sm" fullWidth>
                 <DialogTitle>{isEdit ? 'Editar Libro' : 'Nuevo Libro'}</DialogTitle>
                 <DialogContent>
-                    <TextField
-                        autoFocus margin="dense" label="Título" fullWidth
-                        value={formData.titulo}
-                        onChange={(e) => setFormData({...formData, titulo: e.target.value})}
-                    />
-                    <TextField
-                        margin="dense" label="Autor" fullWidth
-                        value={formData.autor}
-                        onChange={(e) => setFormData({...formData, autor: e.target.value})}
-                    />
+                    <TextField autoFocus margin="dense" label="Título" fullWidth value={bookFormData.titulo} onChange={(e) => setBookFormData({...bookFormData, titulo: e.target.value})} />
+                    <TextField margin="dense" label="Autor" fullWidth value={bookFormData.autor} onChange={(e) => setBookFormData({...bookFormData, autor: e.target.value})} />
                     <Box sx={{ display: 'flex', gap: 2 }}>
-                        <TextField
-                            margin="dense" label="Editorial" fullWidth
-                            value={formData.editorial}
-                            onChange={(e) => setFormData({...formData, editorial: e.target.value})}
-                        />
-                        <TextField
-                            margin="dense" label="Año" type="number" fullWidth
-                            value={formData.anioPublicacion}
-                            onChange={(e) => setFormData({...formData, anioPublicacion: e.target.value})}
-                        />
+                        <TextField margin="dense" label="Editorial" fullWidth value={bookFormData.editorial} onChange={(e) => setBookFormData({...bookFormData, editorial: e.target.value})} />
+                        <TextField margin="dense" label="Año" type="number" fullWidth value={bookFormData.anioPublicacion} onChange={(e) => setBookFormData({...bookFormData, anioPublicacion: e.target.value})} />
                     </Box>
-                    <TextField
-                        margin="dense" label="ISBN" fullWidth
-                        value={formData.isbn}
-                        onChange={(e) => setFormData({...formData, isbn: e.target.value})}
-                    />
+                    <TextField margin="dense" label="ISBN" fullWidth value={bookFormData.isbn} onChange={(e) => setBookFormData({...bookFormData, isbn: e.target.value})} />
                 </DialogContent>
                 <DialogActions>
-                    <Button onClick={handleClose} color="secondary">Cancelar</Button>
-                    <Button onClick={handleSave} variant="contained">Guardar</Button>
+                    <Button onClick={() => setOpenBookModal(false)} color="secondary">Cancelar</Button>
+                    <Button onClick={handleSaveBook} variant="contained">Guardar</Button>
+                </DialogActions>
+            </Dialog>
+
+            {/* MODAL 2: INVENTARIO */}
+            <Dialog open={openCopiesModal} onClose={() => setOpenCopiesModal(false)} maxWidth="sm" fullWidth>
+                <DialogTitle sx={{ bgcolor: '#e3f2fd' }}>Inventario: {selectedBook?.titulo}</DialogTitle>
+                <DialogContent>
+                    <Box sx={{ mt: 2, mb: 3, display: 'flex', gap: 1, alignItems: 'center' }}>
+                        <TextField label="Código de Barras (Ej: L001)" size="small" fullWidth value={copyFormData.codigoBarras} onChange={(e) => setCopyFormData({...copyFormData, codigoBarras: e.target.value})} />
+                        <TextField label="Ubicación" size="small" fullWidth value={copyFormData.ubicacion} onChange={(e) => setCopyFormData({...copyFormData, ubicacion: e.target.value})} />
+                        <Button variant="contained" onClick={handleAddCopy} disabled={!copyFormData.codigoBarras}>Agregar</Button>
+                    </Box>
+                    <Divider sx={{ mb: 2 }}>COPIAS REGISTRADAS</Divider>
+                    <List dense sx={{ maxHeight: 200, overflow: 'auto', bgcolor: '#fafafa', borderRadius: 1 }}>
+                        {copies.length === 0 ? (
+                            <Typography variant="body2" sx={{ p: 2, textAlign: 'center', color: 'gray' }}>No hay copias físicas registradas.</Typography>
+                        ) : (
+                            copies.map((copy) => (
+                                <ListItem 
+                                    key={copy.ejemplarId} 
+                                    divider
+                                    secondaryAction={
+                                        <IconButton edge="end" aria-label="delete" color="error" onClick={() => handleDeleteCopy(copy.ejemplarId)}>
+                                            <Delete />
+                                        </IconButton>
+                                    }
+                                >
+                                    <ListItemText primary={`Código: ${copy.codigoBarras}`} secondary={`Ubicación: ${copy.ubicacion || 'Sin asignar'}`} />
+                                    <Chip label={copy.estado} color={copy.estado === 'Disponible' ? 'success' : 'warning'} size="small" sx={{ mr: 2 }} />
+                                </ListItem>
+                            ))
+                        )}
+                    </List>
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setOpenCopiesModal(false)}>Cerrar Inventario</Button>
                 </DialogActions>
             </Dialog>
         </Box>

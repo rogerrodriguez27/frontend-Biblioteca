@@ -3,24 +3,27 @@ import {
     Box, Button, Typography, Table, TableBody, TableCell, 
     TableContainer, TableHead, TableRow, Paper, IconButton, 
     Dialog, DialogTitle, DialogContent, TextField, DialogActions,
-    MenuItem 
+    MenuItem, InputAdornment
 } from '@mui/material';
-import { Add, Edit, Delete, Person } from '@mui/icons-material';
+import { Add, Edit, Delete, Search } from '@mui/icons-material';
 import Swal from 'sweetalert2';
 import api from '../api/axiosConfig';
 
 const Members = () => {
+    // --- ESTADOS ---
     const [members, setMembers] = useState([]);
+    const [searchTerm, setSearchTerm] = useState(''); // <--- NUEVO ESTADO DE BÚSQUEDA
+
+    // Estados del Modal
     const [open, setOpen] = useState(false);
     const [isEdit, setIsEdit] = useState(false);
     
-    // Formulario para Socios
     const [formData, setFormData] = useState({
         socioId: 0,
         codigo: '',
         nombreCompleto: '',
         email: '',
-        tipoSocio: 'Estudiante' // Valor por defecto
+        tipoSocio: 'Estudiante'
     });
 
     // 1. CARGAR SOCIOS
@@ -37,7 +40,23 @@ const Members = () => {
         fetchMembers();
     }, []);
 
-    // 2. ABRIR MODAL
+    // ==========================================
+    // LÓGICA DE FILTRADO (BÚSQUEDA)
+    // ==========================================
+    const filteredMembers = members.filter((member) => {
+        const searchLower = searchTerm.toLowerCase();
+        
+        // Buscamos por Nombre, Código (DNI) o Email
+        return (
+            member.nombreCompleto.toLowerCase().includes(searchLower) ||
+            member.codigo.toLowerCase().includes(searchLower) ||
+            member.email.toLowerCase().includes(searchLower)
+        );
+    });
+
+    // ==========================================
+    // LÓGICA CRUD
+    // ==========================================
     const handleOpen = (member = null) => {
         if (member) {
             setIsEdit(true);
@@ -54,7 +73,6 @@ const Members = () => {
 
     const handleClose = () => setOpen(false);
 
-    // 3. GUARDAR
     const handleSave = async () => {
         try {
             const inquilinoId = parseInt(localStorage.getItem('inquilinoId'));
@@ -76,11 +94,10 @@ const Members = () => {
         }
     };
 
-    // 4. ELIMINAR
     const handleDelete = (id) => {
         Swal.fire({
             title: '¿Eliminar socio?',
-            text: "Si tiene préstamos activos o históricos, no se podrá borrar.",
+            text: "Si tiene historial de préstamos, no se podrá borrar.",
             icon: 'warning',
             showCancelButton: true,
             confirmButtonColor: '#d33',
@@ -100,16 +117,35 @@ const Members = () => {
 
     return (
         <Box>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 3 }}>
+            {/* ENCABEZADO CON BUSCADOR */}
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 3, alignItems: 'center' }}>
                 <Typography variant="h4" fontWeight="bold">Gestión de Socios</Typography>
-                <Button 
-                    variant="contained" 
-                    color="success" // Color verde para diferenciar
-                    startIcon={<Add />} 
-                    onClick={() => handleOpen()}
-                >
-                    Nuevo Socio
-                </Button>
+                
+                <Box sx={{ display: 'flex', gap: 2 }}>
+                    <TextField
+                        variant="outlined"
+                        size="small"
+                        placeholder="Buscar por Nombre, DNI o Email..."
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        sx={{ width: 300, bgcolor: 'white' }}
+                        InputProps={{
+                            startAdornment: (
+                                <InputAdornment position="start">
+                                    <Search color="action" />
+                                </InputAdornment>
+                            ),
+                        }}
+                    />
+                    <Button 
+                        variant="contained" 
+                        color="success" 
+                        startIcon={<Add />} 
+                        onClick={() => handleOpen()}
+                    >
+                        Nuevo Socio
+                    </Button>
+                </Box>
             </Box>
 
             <TableContainer component={Paper} elevation={2}>
@@ -124,7 +160,8 @@ const Members = () => {
                         </TableRow>
                     </TableHead>
                     <TableBody>
-                        {members.map((member) => (
+                        {/* MAPEAMOS LA LISTA FILTRADA */}
+                        {filteredMembers.map((member) => (
                             <TableRow key={member.socioId} hover>
                                 <TableCell sx={{ fontWeight: 'bold' }}>{member.codigo}</TableCell>
                                 <TableCell>{member.nombreCompleto}</TableCell>
@@ -147,6 +184,17 @@ const Members = () => {
                                 </TableCell>
                             </TableRow>
                         ))}
+
+                        {/* MENSAJE SI NO HAY RESULTADOS */}
+                        {filteredMembers.length === 0 && (
+                            <TableRow>
+                                <TableCell colSpan={5} align="center" sx={{ py: 3 }}>
+                                    <Typography variant="body1" color="text.secondary">
+                                        No se encontraron socios con ese criterio.
+                                    </Typography>
+                                </TableCell>
+                            </TableRow>
+                        )}
                     </TableBody>
                 </Table>
             </TableContainer>

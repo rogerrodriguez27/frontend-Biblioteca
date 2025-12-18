@@ -5,57 +5,63 @@ import {
     Dialog, DialogTitle, DialogContent, DialogActions, 
     MenuItem, TextField, Chip 
 } from '@mui/material';
-import { Add, AssignmentReturn, CheckCircle } from '@mui/icons-material';
+import { Add, AssignmentReturn, CheckCircle, CalendarMonth } from '@mui/icons-material';
 import Swal from 'sweetalert2';
 import api from '../api/axiosConfig';
 
 const Loans = () => {
     const [loans, setLoans] = useState([]);
     const [socios, setSocios] = useState([]);
-    const [ejemplares, setEjemplares] = useState([]); // Solo los disponibles
-    
+    const [ejemplares, setEjemplares] = useState([]);
     const [open, setOpen] = useState(false);
     
-    // Formulario simple: Solo necesitamos elegir quién y qué
+    // FUNCIONES PARA FECHAS POR DEFECTO
+    const getToday = () => new Date().toISOString().split('T')[0];
+    const getNextWeek = () => {
+        const d = new Date();
+        d.setDate(d.getDate() + 7); // Sumar 7 días
+        return d.toISOString().split('T')[0];
+    };
+
+    // FORMULARIO CON FECHAS
     const [formData, setFormData] = useState({
         socioId: '',
-        ejemplarId: ''
+        ejemplarId: '',
+        fechaPrestamo: getToday(),
+        fechaVencimiento: getNextWeek()
     });
 
-    // 1. CARGAR DATOS (Préstamos, Socios y Copias)
     const fetchData = async () => {
         try {
-            // Hacemos 3 peticiones en paralelo para ser rápidos
             const [loansRes, sociosRes, copiesRes] = await Promise.all([
-                api.get('/loans'),   // Historial de préstamos
-                api.get('/members'), // Lista de socios para el combo
-                api.get('/copies')   // Lista de copias para el combo
+                api.get('/loans'),
+                api.get('/members'),
+                api.get('/copies')
             ]);
-
             setLoans(loansRes.data);
             setSocios(sociosRes.data);
-            
-            // Filtramos: Solo mostramos en el combo los libros que están "Disponibles"
-            const disponibles = copiesRes.data.filter(c => c.estado === 'Disponible');
-            setEjemplares(disponibles);
-
+            // Filtramos solo disponibles
+            setEjemplares(copiesRes.data.filter(c => c.estado === 'Disponible'));
         } catch (error) {
             console.error(error);
         }
     };
 
-    useEffect(() => {
-        fetchData();
-    }, []);
+    useEffect(() => { fetchData(); }, []);
 
-    // 2. ABRIR MODAL
     const handleOpen = () => {
-        setFormData({ socioId: '', ejemplarId: '' });
+        // Al abrir, reseteamos a fechas actuales
+        setFormData({ 
+            socioId: '', 
+            ejemplarId: '',
+            fechaPrestamo: getToday(),
+            fechaVencimiento: getNextWeek()
+        });
         setOpen(true);
     };
+
     const handleClose = () => setOpen(false);
 
-    // 3. CREAR PRÉSTAMO
     const handleCreate = async () => {
         try {
             const inquilinoId = parseInt(localStorage.getItem('inquilinoId'));
@@ -63,18 +69,19 @@ const Loans = () => {
             await api.post('/loans', {
                 inquilinoId,
                 socioId: formData.socioId,
-                ejemplarId: formData.ejemplarId
+                ejemplarId: formData.ejemplarId,
+                fechaPrestamo: formData.fechaPrestamo,       // <--- ENVIAMOS FECHA
+                fechaVencimiento: formData.fechaVencimiento  // <--- ENVIAMOS VENCIMIENTO
             });
 
             Swal.fire('Éxito', 'Préstamo registrado correctamente', 'success');
             setOpen(false);
-            fetchData(); // Recargar todo para actualizar la lista de disponibles
+            fetchData(); 
         } catch (error) {
-            Swal.fire('Error', error.response?.data || 'No se pudo crear el préstamo', 'error');
+            Swal.fire('Error', error.response?.data || 'No se pudo crear', 'error');
         }
     };
 
-    // 4. DEVOLVER LIBRO
     const handleReturn = async (prestamoId) => {
         Swal.fire({
             title: '¿Confirmar devolución?',
@@ -86,21 +93,18 @@ const Loans = () => {
         }).then(async (result) => {
             if (result.isConfirmed) {
                 try {
-                    // Enviamos solo el ID (int) como pide el Backend
                     await api.post('/loans/return', prestamoId, {
                         headers: { 'Content-Type': 'application/json' }
                     });
-                    
-                    Swal.fire('Devuelto', 'El libro ha sido devuelto.', 'success');
+                    Swal.fire('Devuelto', 'Libro devuelto con éxito.', 'success');
                     fetchData();
                 } catch (error) {
-                    Swal.fire('Error', 'No se pudo procesar la devolución', 'error');
+                    Swal.fire('Error', 'No se pudo procesar', 'error');
                 }
             }
         });
     };
 
-    // Función auxiliar para formatear fechas bonitas
     const formatDate = (dateString) => {
         if (!dateString) return '-';
         return new Date(dateString).toLocaleDateString();
@@ -110,23 +114,19 @@ const Loans = () => {
         <Box>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 3 }}>
                 <Typography variant="h4" fontWeight="bold">Control de Préstamos</Typography>
-                <Button 
-                    variant="contained" 
-                    color="warning" // Color naranja para diferenciar
-                    startIcon={<Add />} 
-                    onClick={handleOpen}
-                >
+                <Button variant="contained" color="warning" startIcon={<Add />} onClick={handleOpen}>
                     Nuevo Préstamo
                 </Button>
             </Box>
 
             <TableContainer component={Paper} elevation={2}>
                 <Table>
-                    <TableHead sx={{ bgcolor: '#fff3e0' }}> {/* Un fondo suave naranja */}
+                    <TableHead sx={{ bgcolor: '#fff3e0' }}>
                         <TableRow>
                             <TableCell fontWeight="bold">Libro</TableCell>
                             <TableCell>Socio</TableCell>
-                            <TableCell>Fecha Préstamo</TableCell>
+                            <TableCell>Encargado</TableCell> {/* <--- NUEVA COLUMNA */}
+                            <TableCell>Inicio</TableCell>
                             <TableCell>Vencimiento</TableCell>
                             <TableCell>Estado</TableCell>
                             <TableCell align="center">Acción</TableCell>
@@ -136,13 +136,21 @@ const Loans = () => {
                         {loans.map((loan) => (
                             <TableRow key={loan.prestamoId} hover>
                                 <TableCell sx={{ fontWeight: 'bold' }}>
-                                    {loan.ejemplar?.libro?.titulo || 'Libro desconocido'}
+                                    {loan.ejemplar?.libro?.titulo || loan.ejemplar?.Libro?.titulo || 'Desconocido'}
                                     <br/>
                                     <Typography variant="caption" color="text.secondary">
                                         {loan.ejemplar?.codigoBarras}
                                     </Typography>
                                 </TableCell>
                                 <TableCell>{loan.socio?.nombreCompleto}</TableCell>
+                                
+                                {/* NUEVA CELDA: MOSTRAR QUIÉN LO PRESTÓ */}
+                                <TableCell>
+                                    <Typography variant="body2" sx={{ fontWeight: 'medium', color: 'primary.main' }}>
+                                        {loan.usuario?.nombreCompleto || 'Sistema'}
+                                    </Typography>
+                                </TableCell>
+
                                 <TableCell>{formatDate(loan.fechaPrestamo)}</TableCell>
                                 <TableCell sx={{ 
                                     color: new Date(loan.fechaVencimiento) < new Date() && loan.estado === 'Activo' ? 'red' : 'inherit',
@@ -151,25 +159,14 @@ const Loans = () => {
                                     {formatDate(loan.fechaVencimiento)}
                                 </TableCell>
                                 <TableCell>
-                                    <Chip 
-                                        label={loan.estado} 
-                                        color={loan.estado === 'Activo' ? 'warning' : 'success'} 
-                                        size="small" 
-                                    />
+                                    <Chip label={loan.estado} color={loan.estado === 'Activo' ? 'warning' : 'success'} size="small" />
                                 </TableCell>
                                 <TableCell align="center">
-                                    {loan.estado === 'Activo' && (
-                                        <Button 
-                                            variant="outlined" 
-                                            size="small" 
-                                            color="success"
-                                            startIcon={<AssignmentReturn />}
-                                            onClick={() => handleReturn(loan.prestamoId)}
-                                        >
+                                    {loan.estado === 'Activo' ? (
+                                        <Button variant="outlined" size="small" color="success" startIcon={<AssignmentReturn />} onClick={() => handleReturn(loan.prestamoId)}>
                                             Devolver
                                         </Button>
-                                    )}
-                                    {loan.estado === 'Devuelto' && (
+                                    ) : (
                                         <CheckCircle color="success" />
                                     )}
                                 </TableCell>
@@ -179,40 +176,57 @@ const Loans = () => {
                 </Table>
             </TableContainer>
 
-            {/* MODAL NUEVO PRÉSTAMO */}
+            {/* MODAL MEJORADO CON FECHAS */}
             <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
-                <DialogTitle>Registrar Préstamo</DialogTitle>
+                <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <CalendarMonth color="primary"/> Registrar Préstamo
+                </DialogTitle>
                 <DialogContent>
-                    <Typography variant="body2" sx={{ mb: 2, color: 'text.secondary' }}>
-                        Selecciona el socio y el libro físico que se va a llevar.
+                    <Typography variant="body2" sx={{ mb: 2, mt: 1, color: 'text.secondary' }}>
+                        Configure quién se lleva el libro y cuándo debe devolverlo.
                     </Typography>
                     
-                    {/* SELECTOR DE SOCIO */}
                     <TextField
                         select margin="dense" label="Socio" fullWidth
                         value={formData.socioId}
                         onChange={(e) => setFormData({...formData, socioId: e.target.value})}
                     >
-                        {socios.map((socio) => (
-                            <MenuItem key={socio.socioId} value={socio.socioId}>
-                                {socio.nombreCompleto} ({socio.codigo})
+                        {socios.map((s) => (
+                            <MenuItem key={s.socioId} value={s.socioId}>{s.nombreCompleto} ({s.codigo})</MenuItem>
+                        ))}
+                    </TextField>
+
+                    <TextField
+                        select margin="dense" label="Libro Disponible" fullWidth
+                        value={formData.ejemplarId}
+                        onChange={(e) => setFormData({...formData, ejemplarId: e.target.value})}
+                    >
+                        {ejemplares.map((c) => (
+                            <MenuItem key={c.ejemplarId} value={c.ejemplarId}>
+                                {c.libro?.titulo || c.Libro?.titulo} - {c.codigoBarras}
                             </MenuItem>
                         ))}
                     </TextField>
 
-                    {/* SELECTOR DE EJEMPLAR */}
-                    <TextField
-                        select margin="dense" label="Libro (Copia Disponible)" fullWidth
-                        value={formData.ejemplarId}
-                        onChange={(e) => setFormData({...formData, ejemplarId: e.target.value})}
-                        helperText={ejemplares.length === 0 ? "No hay libros disponibles en estante" : ""}
-                    >
-                        {ejemplares.map((copy) => (
-                            <MenuItem key={copy.ejemplarId} value={copy.ejemplarId}>
-                                {copy.libro?.titulo} - (Cód: {copy.codigoBarras})
-                            </MenuItem>
-                        ))}
-                    </TextField>
+                    {/* NUEVOS CAMPOS DE FECHA */}
+                    <Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
+                        <TextField
+                            label="Fecha de Préstamo"
+                            type="date"
+                            fullWidth
+                            InputLabelProps={{ shrink: true }}
+                            value={formData.fechaPrestamo}
+                            onChange={(e) => setFormData({...formData, fechaPrestamo: e.target.value})}
+                        />
+                        <TextField
+                            label="Fecha de Vencimiento"
+                            type="date"
+                            fullWidth
+                            InputLabelProps={{ shrink: true }}
+                            value={formData.fechaVencimiento}
+                            onChange={(e) => setFormData({...formData, fechaVencimiento: e.target.value})}
+                        />
+                    </Box>
 
                 </DialogContent>
                 <DialogActions>
@@ -223,7 +237,7 @@ const Loans = () => {
                         color="warning"
                         disabled={!formData.socioId || !formData.ejemplarId}
                     >
-                        Prestar Libro
+                        Registrar Préstamo
                     </Button>
                 </DialogActions>
             </Dialog>
